@@ -1,0 +1,24 @@
+[package]
+name = "protolith-api"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hyper = { version = "0.14", features = ["full"] }
+pbjson-types = "0.6.0"
+prost = "0.12.3"
+prost-reflect = "0.12.0"
+prost-wkt = "0.5"
+prost-wkt-types = "0.5.0"
+tokio = { version = "1.35.1", features = ["full"] }
+tonic = "0.10.2"
+tower = { version = "0.4.13", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+
+[build-dependencies]
+glob = "0.3.1"
+prost-build = "0.12.3"
+prost-wkt-build = "0.5.0"
+tonic-build = "0.10.2"

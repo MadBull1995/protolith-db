@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "protolith/annotation/v1/annotation.proto";
+
+package protolith.metastore.v1;
+
+message Index {
+    string index_id = 1;
+    string schema_id = 2;
+    string field_name = 3;
+    protolith.annotation.v1.IndexType index_type = 4;
+    bool is_composite = 5;
+    repeated string composite_fields = 6;
+    google.protobuf.Timestamp creation_timestamp = 7;
+}

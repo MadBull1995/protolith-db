@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package protolith.metastore.v1;
+
+message Schema {
+    string schema_id = 1;
+    uint64 schema_version = 2;
+    bytes schema_definition = 3;
+    google.protobuf.Timestamp creation_timestamp = 4;
+    google.protobuf.Timestamp last_updated_timestamp = 5;
+}
+
+message SchemaVersion {
+    string schema_id = 1;
+    uint64 version_number = 2;
+    bool is_current = 3;
+    google.protobuf.Timestamp creation_timestamp = 4;
+}
+

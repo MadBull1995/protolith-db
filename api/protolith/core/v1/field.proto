@@ -1,0 +1,9 @@
+syntax = "proto2";
+
+import "google/protobuf/descriptor.proto";
+package protolith.core.v1;
+
+message Field {
+    required string name = 1;
+    optional google.protobuf.FieldDescriptorProto.Type type = 2;
+}

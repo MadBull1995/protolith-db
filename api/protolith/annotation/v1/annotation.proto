@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+import "google/protobuf/descriptor.proto";
+
+package protolith.annotation.v1;
+
+extend google.protobuf.MessageOptions {
+    optional Collection collection = 50001;
+}
+
+extend google.protobuf.FieldOptions {
+    optional Field field = 50002;
+    optional Key key = 50003;
+}
+
+
+message Collection {
+    string name = 1;
+}
+
+message Key {
+    
+}
+
+message Field {
+    Index index = 1;
+}
+
+message Index {
+    IndexType type = 1;
+}
+
+enum IndexType {
+    HASH = 0;
+    RANGE = 1;
+    TEXT = 2;
+    KEY = 3;
+}

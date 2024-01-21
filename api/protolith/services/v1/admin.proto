@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+import "protolith/types/v1/api.proto";
+import "protolith/core/v1/db.proto";
+
+import "google/protobuf/empty.proto";
+
+package protolith.services.v1;
+
+service AdminService {
+    rpc ListDatabases(google.protobuf.Empty) returns (ListDatabasesResponse);
+    rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
+    rpc CreateOrReplaceDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
+    // rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
+    // rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+}
+
+message CreateDatabaseRequest {
+    // The database name to create
+    string name = 1;
+
+    // The encoded FileDescriptorSet generated from protoc
+    bytes file_descriptor_set = 2;
+}
+
+message CreateDatabaseResponse {
+    string name = 1;
+    protolith.types.v1.ApiOp op = 3;
+}
+
+message ListDatabasesResponse {
+    repeated protolith.core.v1.Database databases = 1;
+}
+
+// message DropDatabaseRequest {
+
+// }
+
+// message DropDatabaseResponse {
+
+// }

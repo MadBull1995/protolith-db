@@ -1,0 +1,10 @@
+[package]
+name = "protolith-error"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+futures = "0.3.30"
+
+[dev-dependencies]
+thiserror = "1.0.56"

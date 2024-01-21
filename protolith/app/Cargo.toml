@@ -1,0 +1,25 @@
+[package]
+name = "protolith-app"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+drain = { version = "0.1.1", features = ["retain"] }
+protolith-core = { path = "../core" }
+protolith-admin = { path = "../admin" }
+protolith-engine = { path = "../engine" }
+regex = "1.10.2"
+thiserror = "1.0.56"
+tokio = { version = "1.35.1", features = ["full"] }
+tracing = "0.1.40"
+tonic = "0.10.2"
+tower = "0.4.13"
+hyper = { version = "0.14", features = ["full"] }
+tower-http = {version="0.5.1", features = ["full"] }
+futures-util = "0.3.30"
+bytes = "1.5.0"
+
+[build-dependencies]
+semver = "1.0.21"

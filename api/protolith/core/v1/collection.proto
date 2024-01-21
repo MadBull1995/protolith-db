@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "protolith/core/v1/field.proto";
+import "protolith/metastore/v1/index.proto";
+
+package protolith.core.v1;
+
+message Collection {
+    string name = 1;
+    string full_name = 2;
+    repeated Field fields = 3;
+    repeated protolith.metastore.v1.Index indexes = 4;
+    bytes descriptor = 5;
+}

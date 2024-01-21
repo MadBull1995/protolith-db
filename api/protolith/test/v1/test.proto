@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "protolith/annotation/v1/annotation.proto";
+
+package protolith.test.v1;
+
+message MyCollection {
+    option (protolith.annotation.v1.collection) = {
+        name: "MyCollection"
+    };
+
+    string id = 1 [(protolith.annotation.v1.key) = {}];
+    string name = 2;
+}

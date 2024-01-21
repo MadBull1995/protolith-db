@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/struct.proto";
+
+import "protolith/types/v1/api.proto";
+
+package protolith.services.v1;
+
+service EngineService {
+    rpc Insert(InsertRequest) returns (InsertResponse);
+    rpc Get(GetRequest) returns (GetResponse);
+
+}
+
+message InsertRequest {
+    string database = 1;
+    google.protobuf.Any data = 2;
+}
+
+message InsertResponse {
+    string collection = 1;
+    protolith.types.v1.ApiOp op = 2;
+}
+
+message GetRequest {
+    string database = 1;
+    string collection = 2;
+    google.protobuf.Value key = 3;
+}
+
+message GetResponse {
+    string collection = 1;
+    google.protobuf.Any data = 2;
+    protolith.types.v1.ApiOp op = 3;
+}

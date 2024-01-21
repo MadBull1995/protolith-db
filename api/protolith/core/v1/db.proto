@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+import "protolith/core/v1/collection.proto";
+
+package protolith.core.v1;
+
+message Database {
+    string name = 1;
+    string path = 2;
+    repeated Collection collections = 3;
+}

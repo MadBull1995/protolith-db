@@ -1,0 +1,30 @@
+[package]
+name = "protolith-tracing"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["stream"]
+ansi = ["tracing-subscriber/ansi"]
+stream = ["thingbuf", "slab"]
+
+[dependencies]
+tracing = "0.1.40"
+tracing-log = "0.2.0"
+slab = { version = "0.4", optional = true }
+tokio = { version = "1", features = ["time"] }
+thingbuf = { version = "0.1.4", features = ["std"], optional = true }
+protolith-error = { path = "../error"}
+
+[dependencies.tracing-subscriber]
+version = "0.3.16"
+default-features = false
+features = [
+    "env-filter",
+    "fmt",
+    "smallvec",
+    "tracing-log",
+    "json",
+    "parking_lot",
+    "registry",
+]

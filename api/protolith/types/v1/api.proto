@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+import "protolith/types/v1/op.proto";
+
+package protolith.types.v1;
+
+message ApiOp {
+    string description = 1;
+    Op type = 2;
+    OpStatus status = 3;
+}

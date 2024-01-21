@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package protolith.types.v1;
+
+enum Op {
+    FETCH = 0;
+    CREATE = 1;
+    UPDATE = 2;
+    DELETE = 3;
+    LIST = 4;
+}
+
+enum OpStatus {
+    SUCCESS = 0;
+    FAILURE = 1;
+    PENDING = 2;
+}
