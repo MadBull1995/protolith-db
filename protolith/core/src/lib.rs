@@ -105,3 +105,15 @@ impl<T: Serialize + Any> Key<T> {
         } 
     }
 }
+
+pub mod collection {
+
+    use serde::{Serialize, Deserialize};
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    pub struct Wrapper {
+        pub id: u64,
+        pub collection: String,
+        pub inner: String,
+    }
+}

@@ -4,7 +4,7 @@ use std::{path::PathBuf, sync::Arc, collections::HashMap, default};
 use protolith_api::{protolith::{
     core::v1::{Collection, Field},
     metastore::v1::{SchemaVersion, Schema, Index}, annotation::v1::IndexType
-}, DescriptorPool, prost::bytes::Bytes, pbjson_types::{FieldDescriptorProto, field_descriptor_proto}, prost_wkt_types::Any};
+}, DescriptorPool, prost::bytes::Bytes, pbjson_types::{FieldDescriptorProto, field_descriptor_proto}, prost_wkt_types::{Any, Struct}};
 use protolith_error::Error;
 use thiserror::Error as tError;
 use crate::{meta_store::{self, MetaStore}, schema};
@@ -12,11 +12,23 @@ use tracing::{debug, info, warn, error};
 pub use rocksdb::DB;
 use protolith_api::prost::Message;
 use prost_reflect::{Kind, DynamicMessage, MessageDescriptor};
+
+#[derive(Debug, Clone, tError)]
+pub enum CoreError {
+    #[error("{0}")]
+    SchemaNotExists(String),
+    #[error("key {1} already exists on collection {0}.")]
+    KeyAlreadyExists(String, String),
+    #[error("internal error: {0}")]
+    Internal(String)
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub db_path: PathBuf,
     pub cache_size: usize,
     pub max_open_files: i32,
+    pub descriptor_file_name: String,
 }
 
 impl Config {
@@ -173,6 +185,24 @@ impl RocksDb {
         let schema = self.meta_store.get_schema(collection)?;
         Ok(schema)
     }
+
+    pub fn create_schema(&mut self, collection: String, key: String, version: u64) -> Result<Schema, Error> {
+        self.meta_store.create_schema(Collection { 
+            name: collection.clone(),
+            full_name: collection.clone(),
+            fields: vec![],
+            indexes: vec![
+                Index {
+                    field_name: key.clone(),
+                    schema_id: format!("{}:{}", collection, version),
+                    index_type: IndexType::Key.into(),
+                    index_id: format!("{}:{}", collection, key),
+                    ..Default::default()
+                }
+            ],
+            ..Default::default()
+        })
+    }
     
     pub fn get_collection(&self, collection: String) -> Result<Collection, Error> {
         let schema = self.meta_store.get_schema(collection)?;
@@ -291,7 +321,7 @@ impl RocksDb {
         Ok(collections)
     }
 
-    pub fn insert(&self, message: Any) -> Result<String, Error> {
+    pub fn insert(&self, message: Any) -> Result<String, CoreError> {
         let message_name = message.type_url.split("/").collect::<Vec<&str>>()[1];
         let message_desc = self.pool.get_message_by_name(&message_name).unwrap();
         
@@ -299,7 +329,8 @@ impl RocksDb {
         let dynamic_message = DynamicMessage::decode(message_desc, buf).unwrap();
         
         let cf = self.db.cf_handle("default").unwrap();
-        let schema: Schema = self.meta_store.get_schema(message_name.to_owned()).unwrap();
+        let schema: Schema = self.meta_store.get_schema(message_name.to_owned())
+            .map_err(|e| CoreError::SchemaNotExists(e.to_string()))?;
         let buf = Bytes::from(schema.schema_definition);
         let col = Collection::decode(buf).unwrap();
         let idx = col.indexes.iter().find(|key| key.index_type()==IndexType::Key).unwrap();
@@ -307,14 +338,49 @@ impl RocksDb {
         let idx_field = binding.as_ref();
         let key = format!("{}:{}", message_name, idx_field.as_str().unwrap());
         debug!(collection = ?message_name, key = ?key, bytes = ?message.value.len(), "insert");
-        let exist = self.db.get_pinned_cf(cf, key.clone().into_bytes())?;
+        let exist = self.db.get_pinned_cf(cf, key.clone().into_bytes())
+            .map_err(|e| CoreError::Internal(e.into_string()))?;
         match exist {
             None => {
                 self.db.put_cf(cf, key.into_bytes(), message.value).unwrap();
                 Ok(message_name.to_owned())
             },
-            Some(_) => Err(format!("key {} already exists on {}", key, message_name).into())
+            Some(_) => Err(CoreError::KeyAlreadyExists(message_name.to_owned(),key).into())
         }
+    }
+
+    pub fn list(
+        &self,
+        collection: String,
+    ) -> Result<Vec<Any>, Error> {
+        debug!(db = self.name.clone(), collection = collection);
+        let message_desc = self.pool.get_message_by_name(&collection).unwrap();
+        let mut data = Vec::new();
+        let prefix = collection.clone().into_bytes();
+        let cf_handle = self.db.cf_handle("default").unwrap();
+        let iter_mode = IteratorMode::From(&prefix, rocksdb::Direction::Forward);
+        let iter = self.db.iterator_cf(cf_handle, iter_mode);
+        for i in iter {
+            match i {
+                Ok(item) => {
+                    if !item.0.starts_with(&prefix) {
+                        break;
+                    } 
+        
+                    let buf = Bytes::from(item.1);
+                    let dynamic_message = DynamicMessage::decode(message_desc.clone(), buf).unwrap();
+                    let mut buf = Vec::new();
+                    dynamic_message.encode(&mut buf).unwrap();
+                    let any = Any { 
+                        type_url: format!("type.googleapis.com/{}", collection),
+                        value: buf
+                    };
+                    data.push(any)
+                },
+                Err(e) => error!(err = ?e, "failed to iter item")
+            }
+        }
+        Ok(data)
     }
 }
 

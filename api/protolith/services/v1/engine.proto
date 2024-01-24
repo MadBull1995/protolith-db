@@ -10,7 +10,7 @@ package protolith.services.v1;
 service EngineService {
     rpc Insert(InsertRequest) returns (InsertResponse);
     rpc Get(GetRequest) returns (GetResponse);
-
+    rpc List(ListRequest) returns (ListResponse);
 }
 
 message InsertRequest {
@@ -32,5 +32,16 @@ message GetRequest {
 message GetResponse {
     string collection = 1;
     google.protobuf.Any data = 2;
+    protolith.types.v1.ApiOp op = 3;
+}
+
+message ListRequest {
+    string database = 1;
+    string collection = 2;
+}
+
+message ListResponse {
+    string collection = 1;
+    repeated google.protobuf.Any data = 2;
     protolith.types.v1.ApiOp op = 3;
 }

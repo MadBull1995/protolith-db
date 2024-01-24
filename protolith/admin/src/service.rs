@@ -1,10 +1,12 @@
-use std::sync::Arc;
+use std::{sync::Arc, fmt::format};
 
 use protolith_api::{protolith::{
     services::v1::{
         CreateDatabaseRequest,
         CreateDatabaseResponse,
         ListDatabasesResponse,
+        CreateCollectionRequest,
+        CreateCollectionResponse,
         admin_service_server::AdminService
     }
 }, pbjson_types::Empty};
@@ -79,7 +81,20 @@ impl<E: Engine> AdminService for ProtolithAdminService<E> {
             Err(e) => Err(Status::internal(e.to_string())),
             Ok(databases) => Ok(Response::new(databases)),
         }
-        
+    }
 
+    async fn create_collection(&self, request: Request<CreateCollectionRequest>) -> Result<Response<CreateCollectionResponse>, Status> {
+        let req = request.into_inner();
+        let rep = self.engine.create_collection(req.database, req.collection, req.key, 1)
+            .await
+            .map_err(|err| match err {
+                protolith_engine::EngineError::Internal(err) => Status::internal(format!("{}", err)),
+                protolith_engine::EngineError::OpError(op_err) => match op_err {
+                    protolith_engine::OpError::DatabaseNotFound(err) => Status::not_found(err),
+                    protolith_engine::OpError::CollectionAlreadyExists(db, col) => Status::already_exists(format!("{} already exists on {}", col, db)),
+                    _ => unreachable!()
+                },
+            })?;
+        Ok(Response::new(rep))
     }
 }

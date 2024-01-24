@@ -6,7 +6,7 @@ use protolith_api::{protolith::{
 }, pbjson_types::Timestamp};
 use protolith_error::{Result, Error};
 use rocksdb::{DB, IteratorMode};
-use tracing::{error, debug};
+use tracing::{error, debug, info};
 use protolith_api::prost::Message;
 use crate::{db::RocksDb, schema};
 
@@ -90,8 +90,10 @@ impl MetaStore {
         Ok(())
     }
 
-    pub fn create_schema(&self) -> Result<(), Error> {
-        Ok(())
+    pub fn create_schema(&mut self, mut collection_schema: Collection) -> Result<Schema, Error> {
+        let schema = handle_no_version_schema(self.schema.clone(), self.db.clone(), &mut collection_schema);
+        self.cache.insert(collection_schema.full_name, schema.clone());
+        Ok(schema)
     }
 
     pub fn get_schema(&self, collection: String) -> Result<Schema, Error> {
@@ -174,7 +176,7 @@ fn handle_versioned_schema(schema_cf_name: String, schema_versions_cf_name: Stri
         schema.encode(&mut buf_schema).unwrap();
         db.put_cf(schema_versions_handle, &key, buf_ver).unwrap();
         db.put_cf(schema_handle, &key, buf_schema).unwrap();
-        debug!(collection = ?key, version = ?latest, "Created new schema:");
+        info!(collection = ?key, version = ?latest, "Created new versioned schema:");
         return schema
     } else {
         // Handling updating version for schema
@@ -202,7 +204,7 @@ fn handle_no_version_schema(schema_cf_name: String, db: Arc<DB>, collection: &mu
     let mut buf_schema = vec![];
     schema.encode(&mut buf_schema).unwrap();
     db.put_cf(schema_cf_handle, key.clone(), buf_schema).unwrap();
-    debug!(collection = ?schema_id, version = ?default_ver, "Created new schema:");
+    info!(collection = ?schema_id, version = ?default_ver, "Created new schema:");
     schema
 }
 

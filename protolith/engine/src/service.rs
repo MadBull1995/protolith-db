@@ -1,7 +1,7 @@
-use protolith_core::api::{protolith::services::v1::{
-    InsertRequest, InsertResponse, GetRequest, GetResponse,
+use protolith_core::api::{protolith::{services::v1::{
+    InsertRequest, InsertResponse, GetRequest, GetResponse, ListRequest, ListResponse,
     engine_service_server::{EngineService, self}
-}, pbjson_types::{Value, value::Kind}};
+}, types::v1::{ApiOp, OpStatus, Op}}, pbjson_types::{Value, value::Kind}};
 use tracing::debug;
 
 use crate::Engine;
@@ -27,6 +27,32 @@ impl<E: Engine> ProtolithEngineService<E> {
 #[tonic::async_trait]
 impl<E: Engine> EngineService for ProtolithEngineService<E> {
     
+    async fn list(&self, request: Request<ListRequest>) -> Result<Response<ListResponse>, Status> {
+        let req = request.into_inner();
+        let database = req.database;
+        let collection = req.collection;
+
+        let data = self.engine.list(database, collection.clone())
+            .await
+            .map_err(|err| match err {
+                crate::EngineError::Internal(e) => Status::internal(e.to_string()),
+                crate::EngineError::OpError(op) => match op {
+                    crate::OpError::DatabaseNotFound(e) => Status::not_found(e),
+                    crate::OpError::KeyAlreadyExists(e) => Status::already_exists(e.to_string()),
+                    _ => unreachable!(),
+                },
+            })?;
+        let length = data.len();
+        Ok(Response::new(ListResponse { 
+            collection: collection.clone(), data, op: Some(ApiOp {
+                description: format!("list {} successfully. {} items fetched.", collection, length),
+                status: OpStatus::Success.into(),
+                r#type: Op::List.into(),
+            })}
+        ))
+
+    }
+
     async fn insert(&self, request: Request<InsertRequest>) -> Result<Response<InsertResponse>, Status> {
         let req = request.into_inner();
         if let Some(any) = req.data {

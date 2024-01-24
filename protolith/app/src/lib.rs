@@ -7,7 +7,7 @@ use hyper::Request;
 use layer::{MetadataLayer, TracingLayer};
 use tokio::{sync::{mpsc, oneshot, watch}, signal};
 pub use build_info::BUILD_INFO;
-use engine::{Engine, ProtolithDbEngine, service::ProtolithEngineService};
+use engine::{Engine, ProtolithDbEngine, service::ProtolithEngineService, Admin as _};
 use protolith_core::{error::Error, api::{protolith::services::v1::admin_service_server::{AdminServiceServer, AdminService}, DescriptorPool, prost::bytes::Bytes}, db::RocksDb};
 use tracing::{debug, info, warn, Instrument, info_span};
 use std::{time::Duration, collections::{HashMap, HashSet}, sync::Arc, net::SocketAddr, path::{PathBuf, Path}, fs::{self, File}, io::{BufReader, Read}};
@@ -34,12 +34,12 @@ pub struct App {
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    db: db::Config,
+    pub db: db::Config,
     admin: admin::Config,
     meta_store: meta_store::Config,
     schema: schema::Config,
     addr: SocketAddr,
-    pub databases: Vec<String>,
+    pub default_database: (String, PathBuf),
     pub destroy_on_shutdown: bool,
     pub shutdown_grace_period: Duration,
 }
@@ -60,7 +60,7 @@ impl Config {
             admin,
             meta_store,
             schema,
-            databases,
+            default_database,
             addr,
             destroy_on_shutdown,
             ..
@@ -75,17 +75,21 @@ impl Config {
         
         let existing_databases = find_rocksdb_databases(db.db_path.as_path());
         let mut folder_set = HashSet::new();
-        for database in existing_databases.iter().chain(databases.iter()) {
-            let descriptor_path = db.db_path.join(database).join("descriptor.bin");
+        
+        folder_set.insert((default_database.0, default_database.1));
+        
+        for database in existing_databases.iter() {
+            let descriptor_path = db.db_path.join(database).join(db.descriptor_file_name.clone());
             folder_set.insert((database.to_string(), descriptor_path));
         }
+
         let merged_databases: Vec<(String, PathBuf)> = folder_set.into_iter().collect();
         for (db_name, descriptor_path) in merged_databases {
             let f = File::open(descriptor_path.clone());
             let f = {
                 match f {
                     Err(e) => {
-                        warn!(db = ?db_name, err = ?e, "failed to locate protobuf descriptor file in");
+                        warn!(db = ?db_name, path = ?descriptor_path, err = ?e, "failed to locate protobuf descriptor file in");
                         Bytes::from(vec![])
                     },
                     Ok(f) => {
@@ -103,8 +107,7 @@ impl Config {
         }
         
         let engine = engine::ProtolithDbEngine::new(db, meta_store.clone(), schema.clone(), dbs.clone());
-        
-        
+
         // let meta_store = meta_store.build(dbs.clone());
         debug!(config = ?schema, "Building Schema");
 
@@ -133,8 +136,9 @@ impl App {
             destroy_on_shutdown,
             ..
         } = self;
-
-        let admin_service = admin.clone().service();
+        
+        let max_message_size = 1 * 1024 * 1024;
+        let admin_service = admin.clone().service(max_message_size);
         let mut engine = engine.clone();
         let engine_service = ProtolithEngineService::new(engine.clone()).service();
         let destroy_on_shutdown = destroy_on_shutdown;

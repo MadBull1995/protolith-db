@@ -1,10 +1,12 @@
+use std::{marker::PhantomData, hash::Hash, fmt::Debug, future::Future};
+
 use protolith_core::{
     Key,
     api::{
-        prost::Message,
+        prost::{Message, Name},
         prost_wkt_types::{Any, MessageSerde},
         protolith::services::v1::{
-            engine_service_client::EngineServiceClient, InsertRequest, InsertResponse, GetRequest, GetResponse,
+            engine_service_client::EngineServiceClient, InsertRequest, InsertResponse, GetRequest, GetResponse, ListResponse, ListRequest,
         },
         service::MetadataSvc, pbjson_types::Value,
     },
@@ -33,11 +35,37 @@ impl Client {
         }
     }
 
-    pub async fn get<T>(&mut self, collection: String, key: &Key<T>) -> Result<GetResponse, Error> 
-    where
-        T: serde::Serialize,
-        T: 'static,
+    pub async fn list<C>(&mut self) -> Result<Vec<Response<C::Message>>, Error>
+    where 
+        C: Collection,
+        C::Message: Name
     {
+        let collection = C::Message::full_name();
+        let list = self.engine_client.list(ListRequest {
+            database: self.database.clone(),
+            collection: collection.clone(),
+        }.into_request()).await?;
+        let l = list.into_inner();
+        let mut data_list = Vec::with_capacity(l.data.len());
+        for d in l.data {
+            let rep = Response {
+                collection: collection.clone(),
+                data: d,
+                _marker: PhantomData,
+            };
+            data_list.push(rep);
+        }
+
+        Ok(data_list)
+    }
+
+    pub async fn get<C>(&mut self, key: &Key<C::Key>) -> Result<Response<C::Message>, Error> 
+    where
+        C: Collection,
+        C::Key: serde::Serialize + 'static,
+        C::Message: Message + Name + Default,
+    {
+        let collection = C::Message::full_name();
         let value = self.engine_client.get(
             GetRequest {
                 database: self.database.clone(),
@@ -45,12 +73,26 @@ impl Client {
                 key: Some(key.as_value())
             }.into_request()
         ).await?;
-        Ok(value.into_inner())
+        let rep = value.into_inner();
+        let data = if let Some(data) = rep.data {
+            data
+        } else {
+            Any {
+                ..Default::default()
+            }
+        };
+        let rep = Response {
+            collection: rep.collection,
+            data,
+            _marker: PhantomData,
+        };
+        Ok(rep)
     }
 
-    pub async fn insert<M: Message>(&mut self, message: M) -> Result<InsertResponse, Error>
+    pub async fn insert<C>(&mut self, message: C::Message) -> Result<InsertResponse, Error>
     where
-        M: MessageSerde + Default,
+        C: Collection,
+        C::Message: MessageSerde + Default,
     {
         let any = Any::try_pack(message)?;
         let rep = self
@@ -65,4 +107,35 @@ impl Client {
             .await?;
         Ok(rep.into_inner())
     }
+
+}
+
+
+#[derive(Debug)]
+pub struct Response<T> {
+    collection: String,
+    data: Any,
+    _marker: PhantomData<T>,
+}
+
+
+impl<T> Response<T> 
+where
+    T: Message + Default,
+{
+    pub fn into_inner(self) -> Result<T, Error> {
+        let bytes = self.data.value; // Assuming `Any` follows prost_types::Any structure.
+        T::decode(bytes.as_slice())  // Decode the bytes into the desired type.
+            .map_err(|e| e.into())   // Convert decoding error into a Box<dyn Error>.
+    }
+}
+
+pub trait Collection {
+    type Key: Debug + 'static;
+    type Message: Debug + 'static;
+
+    fn list(&mut self) -> impl Future<Output =  Result<Vec<Response<Self::Message>>, Error>>;
+    fn insert(&mut self, msg: Self::Message) -> impl Future<Output =  Result<InsertResponse, Error>>;
+    fn get(&mut self, key: Key<Self::Key>) -> impl Future<Output =  Result<Response<Self::Message>, Error>>;
+
 }

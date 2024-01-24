@@ -12,3 +12,17 @@ message MyCollection {
     string id = 1 [(protolith.annotation.v1.key) = {}];
     string name = 2;
 }
+
+message OtherCollection {
+    option (protolith.annotation.v1.collection) = {
+        name: "OtherCollection"
+    };
+
+    string some_key = 1 [(protolith.annotation.v1.key) = {}];
+    string data = 2;
+}
+
+message NotCollection {
+    string some_id = 1;
+    string some_data = 2;
+}

@@ -13,6 +13,7 @@ service AdminService {
     rpc CreateOrReplaceDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
     // rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
     // rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+    rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
 }
 
 message CreateDatabaseRequest {
@@ -25,7 +26,7 @@ message CreateDatabaseRequest {
 
 message CreateDatabaseResponse {
     string name = 1;
-    protolith.types.v1.ApiOp op = 3;
+    protolith.types.v1.ApiOp op = 2;
 }
 
 message ListDatabasesResponse {
@@ -39,3 +40,15 @@ message ListDatabasesResponse {
 // message DropDatabaseResponse {
 
 // }
+
+message CreateCollectionRequest {
+    string database = 1;
+    string collection = 2;
+    string key = 3;
+}
+
+message CreateCollectionResponse {
+    string database = 1;
+    string name = 2;
+    protolith.types.v1.ApiOp op = 3;
+}

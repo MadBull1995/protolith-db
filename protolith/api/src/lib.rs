@@ -7,13 +7,6 @@ pub use prost_wkt_types;
 pub use api::protolith;
 pub use prost_reflect::{DescriptorPool, DynamicMessage, MessageDescriptor};
 
-pub fn get_protolith_file_descriptor() -> DescriptorPool {
-    let pool = DescriptorPool::decode(include_bytes!(concat!(env!("OUT_DIR"), "/descriptors.bin")).as_ref()).unwrap();
-    // dbg!(pool.clone());
-    pool
-}
-
-
 pub mod service {
     pub const HEADER_USER_AGENT: &str = "protolith-user-agent";
     // use hyper::http::{Request, Response};

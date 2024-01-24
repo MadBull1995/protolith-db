@@ -6,7 +6,8 @@ use prost_wkt_build::*;
 
 fn main() -> io::Result<()> {
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let descriptor_file = out.join("descriptors.bin");
+    let descriptor_file = out.join("descriptor.bin");
+    let test_descriptor_path = PathBuf::from("../../descriptor.bin");
     let protos: Vec<PathBuf> = glob("../../api/protolith/**/v1/*.proto")
         .unwrap()
         .filter_map(Result::ok)
@@ -36,7 +37,7 @@ fn main() -> io::Result<()> {
     let descriptor_bytes =
         std::fs::read(descriptor_file)
         .unwrap();
-
+    std::fs::write(test_descriptor_path, descriptor_bytes.clone());
     let descriptor =
         FileDescriptorSet::decode(&descriptor_bytes[..])
         .unwrap();

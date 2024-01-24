@@ -13,3 +13,6 @@ tokio = { version = "1.35.1", features = ["full"] }
 tower = { version = "0.4.13", features = ["full"] }
 hyper = { version = "0.14", features = ["full"] }
 protolith-engine = {path = "../engine"}
+protolith-macros = {path = "../macros"}
+serde_json = "1.0.111"
+serde = { version = "1.0.195", features = ["derive"] }

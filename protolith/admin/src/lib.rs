@@ -30,7 +30,9 @@ pub struct Admin<E: Engine> {
 }
 
 impl<E: Engine> Admin<E> {
-    pub fn service(self) -> AdminServiceType<E> {
+    pub fn service(self, max_message_size: usize) -> AdminServiceType<E> {
         admin_service_server::AdminServiceServer::new(self.admin)
+            .max_decoding_message_size(max_message_size)
+            .max_encoding_message_size(max_message_size)
     }
 }
