@@ -1,13 +1,13 @@
-use std::{time::Duration, collections::HashMap, sync::Arc};
+use std::sync::Arc;
 mod client;
 mod service;
 
-use protolith_engine::{Engine, ProtolithDbEngine};
+use protolith_engine::Engine;
 use protolith_error::Error;
 pub use client::{Client, AdminServiceClient};
 use protolith_api::protolith::services::v1::admin_service_server;
 pub use service::ProtolithAdminService;
-type AdminServiceType<E: Engine> = admin_service_server::AdminServiceServer<ProtolithAdminService<E>>;
+type AdminServiceType<E> = admin_service_server::AdminServiceServer<ProtolithAdminService<E>>;
 
 #[derive(Debug, Clone)]
 pub struct Config {

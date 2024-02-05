@@ -1,32 +1,25 @@
 use std::fs;
-use std::io::{Read, BufReader};
 use std::{collections::HashMap, future::Future, sync::Arc};
 pub mod service;
 pub mod client;
 use protolith_core::api::DescriptorPool;
-use protolith_core::api::prost::Message;
 use protolith_core::api::prost::bytes::Bytes;
 use protolith_core::api::prost_wkt_types::Any;
 use protolith_core::schema;
-use rocksdb::{AsColumnFamilyRef, BlockBasedOptions, ColumnFamilyDescriptor, Options, DB};
-use service::ProtolithEngineService;
+use rocksdb::{Options, DB};
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 mod error;
 pub use error::{EngineError, OpError};
 use protolith_core::api::protolith::core::v1::Collection;
 
 
 use protolith_core::{
-    api::{
-        protolith::{
-            self,
-            core::v1::{Database},
+    api::protolith::{
+            core::v1::Database,
             services::v1::{CreateDatabaseResponse, ListDatabasesResponse, CreateCollectionResponse},
             types::v1::{ApiOp, Op, OpStatus},
         },
-        DynamicMessage, MessageDescriptor,
-    },
     db,
     error::{Error, Result},
     meta_store,
@@ -93,6 +86,14 @@ pub trait Metadata {
     fn version(&self) -> &str;
 }
 
+pub trait Login {
+    fn login_user(
+        &self,
+        username: String,
+        passwrod: String,
+    ) -> impl Future<Output = Result<String, EngineError>> + Send;
+}
+
 pub trait Admin {
     fn list_databases(
         &self,
@@ -109,9 +110,14 @@ pub trait Admin {
         key: String,
         version: u64,
     ) -> impl Future<Output = Result<CreateCollectionResponse, EngineError>> + Send;
+    fn create_user(
+        &self,
+        username: String,
+        passwrod: String,
+    ) -> impl Future<Output = Result<(), EngineError>> + Send;
 }
 
-pub trait Engine: Admin + Metadata + Sync + Send + 'static {
+pub trait Engine: Login + Admin + Metadata + Sync + Send + 'static {
     fn insert(
         &self,
         database: String,
@@ -154,7 +160,33 @@ impl Metadata for ProtolithDbEngine {
     }
 }
 
+impl Login for ProtolithDbEngine {
+    async fn login_user(
+            &self,
+            username: String,
+            password: String,
+    ) -> Result<String, EngineError> {
+        let inner = self.inner.lock().await;
+        let default_db = inner.dbs.get(&self.meta_store_config.default_db).unwrap();
+        if let Some(session) = default_db.login_user(username.clone(), password) {
+            Ok(session)
+        } else {
+            Err(EngineError::OpError(OpError::UserNotFound(username)))
+        }
+    }
+}
+
 impl Admin for ProtolithDbEngine {
+    async fn create_user(&self, username: String, password: String) -> Result<(), EngineError> {
+        let inner = self.inner.lock().await;
+        let default_db = inner.dbs.get(&self.meta_store_config.default_db).unwrap();
+        default_db
+            .create_user(username.clone(), password.clone())
+            .map_err(|e| EngineError::Internal(e))?;
+        info!(username = ?username, "created new");
+        Ok(())
+    }
+
     async fn create_database(&self, name: String, fd_descriptor: Vec<u8>) -> Result<CreateDatabaseResponse, EngineError> {
         let mut inner = self.inner.lock().await;
         if inner.dbs.contains_key(&name) {
@@ -272,8 +304,8 @@ impl Engine for ProtolithDbEngine {
     ) -> Result<Any, EngineError> {
         let inner = self.inner.lock().await;
         if let Some(db) = inner.dbs.get(&database) {
-            let schema = db.get_schema(collection.clone())
-                .map_err(|e| EngineError::OpError(OpError::CollectionNotFound(collection.clone(), database)))?;
+            let _ = db.get_schema(collection.clone())
+                .map_err(|_e| EngineError::OpError(OpError::CollectionNotFound(collection.clone(), database)))?;
             let value = db.get(collection.clone(), key).unwrap();
             Ok(value)
 

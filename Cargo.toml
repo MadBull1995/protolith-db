@@ -1,3 +1,3 @@
 [workspace]
-members = ["protolith-db", "protolith/admin", "protolith/api", "protolith/app", "protolith/client", "protolith/core", "protolith/engine", "protolith/error", "protolith/macros", "protolith/tracing"]
+members = ["protolith-db", "protolith/admin", "protolith/api", "protolith/app", "protolith/auth", "protolith/client", "protolith/core", "protolith/engine", "protolith/error", "protolith/macros", "protolith/tracing"]
 

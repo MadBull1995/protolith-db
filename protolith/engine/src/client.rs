@@ -1,16 +1,17 @@
-use std::{marker::PhantomData, hash::Hash, fmt::Debug, future::Future};
+use std::{fmt::Debug, future::Future, marker::PhantomData};
 
 use protolith_core::{
-    Key,
     api::{
         prost::{Message, Name},
         prost_wkt_types::{Any, MessageSerde},
         protolith::services::v1::{
-            engine_service_client::EngineServiceClient, InsertRequest, InsertResponse, GetRequest, GetResponse, ListResponse, ListRequest,
+            engine_service_client::EngineServiceClient, GetRequest, InsertRequest,
+            InsertResponse, ListRequest,
         },
-        service::MetadataSvc, pbjson_types::Value,
+        service::MetadataSvc,
     },
     error::Error,
+    Key,
 };
 use tonic::{transport::Channel, IntoRequest};
 
@@ -18,10 +19,11 @@ use tonic::{transport::Channel, IntoRequest};
 pub struct Client {
     engine_client: EngineServiceClient<MetadataSvc>,
     database: String,
+    session: String,
 }
 
 impl Client {
-    pub fn new(channel: Channel, database: String) -> Self {
+    pub fn new(channel: Channel, database: String, session: String) -> Self {
         const VERSION: Option<&str> = option_env!("CARGO_PKG_VERSION");
 
         let channel = tower::ServiceBuilder::new()
@@ -32,19 +34,25 @@ impl Client {
         Self {
             engine_client,
             database,
+            session,
         }
     }
 
     pub async fn list<C>(&mut self) -> Result<Vec<Response<C::Message>>, Error>
-    where 
+    where
         C: Collection,
-        C::Message: Name
+        C::Message: Name,
     {
         let collection = C::Message::full_name();
-        let list = self.engine_client.list(ListRequest {
+        let mut request = ListRequest {
             database: self.database.clone(),
             collection: collection.clone(),
-        }.into_request()).await?;
+        }
+        .into_request();
+        request
+            .metadata_mut()
+            .insert("protolith-session", self.session.parse().unwrap());
+        let list = self.engine_client.list(request).await?;
         let l = list.into_inner();
         let mut data_list = Vec::with_capacity(l.data.len());
         for d in l.data {
@@ -59,20 +67,24 @@ impl Client {
         Ok(data_list)
     }
 
-    pub async fn get<C>(&mut self, key: &Key<C::Key>) -> Result<Response<C::Message>, Error> 
+    pub async fn get<C>(&mut self, key: &Key<C::Key>) -> Result<Response<C::Message>, Error>
     where
         C: Collection,
         C::Key: serde::Serialize + 'static,
         C::Message: Message + Name + Default,
     {
         let collection = C::Message::full_name();
-        let value = self.engine_client.get(
-            GetRequest {
-                database: self.database.clone(),
-                collection: collection,
-                key: Some(key.as_value())
-            }.into_request()
-        ).await?;
+        let mut request = GetRequest {
+            database: self.database.clone(),
+            collection: collection,
+            key: Some(key.as_value()),
+        }
+        .into_request();
+
+        request
+            .metadata_mut()
+            .insert("protolith-session", self.session.parse().unwrap());
+        let value = self.engine_client.get(request).await?;
         let rep = value.into_inner();
         let data = if let Some(data) = rep.data {
             data
@@ -95,21 +107,18 @@ impl Client {
         C::Message: MessageSerde + Default,
     {
         let any = Any::try_pack(message)?;
-        let rep = self
-            .engine_client
-            .insert(
-                InsertRequest {
-                    database: self.database.clone(),
-                    data: Some(any),
-                }
-                .into_request(),
-            )
-            .await?;
+        let mut request = InsertRequest {
+            database: self.database.clone(),
+            data: Some(any),
+        }
+        .into_request();
+        request
+            .metadata_mut()
+            .insert("protolith-session", self.session.parse().unwrap());
+        let rep = self.engine_client.insert(request).await?;
         Ok(rep.into_inner())
     }
-
 }
-
 
 #[derive(Debug)]
 pub struct Response<T> {
@@ -118,15 +127,14 @@ pub struct Response<T> {
     _marker: PhantomData<T>,
 }
 
-
-impl<T> Response<T> 
+impl<T> Response<T>
 where
     T: Message + Default,
 {
     pub fn into_inner(self) -> Result<T, Error> {
         let bytes = self.data.value; // Assuming `Any` follows prost_types::Any structure.
-        T::decode(bytes.as_slice())  // Decode the bytes into the desired type.
-            .map_err(|e| e.into())   // Convert decoding error into a Box<dyn Error>.
+        T::decode(bytes.as_slice()) // Decode the bytes into the desired type.
+            .map_err(|e| e.into()) // Convert decoding error into a Box<dyn Error>.
     }
 }
 
@@ -134,8 +142,11 @@ pub trait Collection {
     type Key: Debug + 'static;
     type Message: Debug + 'static;
 
-    fn list(&mut self) -> impl Future<Output =  Result<Vec<Response<Self::Message>>, Error>>;
-    fn insert(&mut self, msg: Self::Message) -> impl Future<Output =  Result<InsertResponse, Error>>;
-    fn get(&mut self, key: Key<Self::Key>) -> impl Future<Output =  Result<Response<Self::Message>, Error>>;
-
+    fn list(&mut self) -> impl Future<Output = Result<Vec<Response<Self::Message>>, Error>>;
+    fn insert(&mut self, msg: Self::Message)
+        -> impl Future<Output = Result<InsertResponse, Error>>;
+    fn get(
+        &mut self,
+        key: Key<Self::Key>,
+    ) -> impl Future<Output = Result<Response<Self::Message>, Error>>;
 }

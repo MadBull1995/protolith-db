@@ -16,3 +16,5 @@ chrono = "0.4.31"
 prost-reflect = "0.12.0"
 serde = "1.0.195"
 serde_json = "1.0.111"
+uuid = { version = "1.7.0", features = ["v4"] }
+bcrypt = "0.15.0"

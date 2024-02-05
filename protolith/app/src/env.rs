@@ -1,13 +1,13 @@
 use std::{
-    collections::{HashMap, HashSet},
-    fs,
-    net::{IpAddr, SocketAddr},
+    collections::HashMap,
+    net::SocketAddr,
     path::PathBuf,
     str::FromStr,
     time::Duration,
 };
 use thiserror::Error;
-use tracing::{debug, error, info, warn};
+use protolith_auth as auth;
+use tracing::error;
 use protolith_core::{
     db, meta_store, schema
 };
@@ -87,9 +87,12 @@ pub const ENV_DB_CACHE_SIZE: &str = "PROTOLITH_DB_CACHE_SIZE";
 pub const ENV_METASTORE_INDEX_NAME: &str = "PROTOLITH_METASTORE_INDEX_NAME";
 pub const ENV_METASTORE_SCHEMA_NAME: &str = "PROTOLITH_METASTORE_SCHEMA_NAME";
 pub const ENV_METASTORE_VERSION_NAME: &str = "PROTOLITH_METASTORE_VERSION_NAME";
+pub const ENV_METASTORE_USER: &str = "PROTOLITH_METASTORE_USER";
 pub const ENV_SCHEMA_DEFAULT_VERSION: &str = "PROTOLITH_SCHEMA_DEFAULT_VERSION";
 pub const ENV_SCHEMA_ENABLE_VERSIONING: &str = "PROTOLITH_SCHEMA_VERSIONING";
 pub const ENV_ADDR: &str = "PROTOLITH_ADDR";
+pub const ENV_USER: &str = "PROTOLITH_USER";
+pub const ENV_PASS: &str = "PROTOLITH_PASS";
 const ENV_SHUTDOWN_GRACE_PERIOD: &str = "PROTOLITH_SHUTDOWN_GRACE_PERIOD";
 const ENV_DATABASE: &str = "PROTOLITH_DATABASE";
 const ENV_DB_DROP_ON_SHUTDOWN: &str = "PROTOLITH_DESTROY_ON_SHUTDOWN";
@@ -98,12 +101,15 @@ const ENV_DEFAULT_DB_DESCRIPTOR_PATH: &str = "PROTOLITH_DEFAULT_DB_DESCRIPTOR";
 
 // Default values for various configuration fields
 const DEFAULT_DB_MAX_OPEN_FILES: i32 = 1000;
-const DEFAULT_DB_CACHE_SIZE: usize = 1 * 1024 * 1024 * 1024; // 1GB in bytes
+const DEFAULT_DB_CACHE_SIZE: usize = 50 * 1024 * 1024 * 1024; // 1GB in bytes
 const DEFAULT_INDEX_CF_NAME: &str = "index";
 const DEFAULT_SCHEMA_CF_NAME: &str = "schema";
 const DEFAULT_SCHEMA_VERSIONS_CF_NAME: &str = "schema_versions";
+const DEFAULT_USER_CF_NAME: &str = "user";
 const DEFAULT_ADDR: &str = "0.0.0.0:5678";
 const DEFAULT_DB_DESCRIPTOR: &str = "/usr/src/bin/protolith-db/descriptor.bin";
+const DEFAULT_USER: &str = "protolith";
+const DEFAULT_PASS: &str = "protolith";
 
 // 2 minutes seems like a reasonable amount of time to wait for connections to close...
 const DEFAULT_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(2 * 60);
@@ -120,6 +126,7 @@ pub fn parse_config<S: Strings>(strings: &S) -> Result<super::Config, EnvError> 
     let index_cf_name = parse(strings, ENV_METASTORE_INDEX_NAME, parse_string);
     let schema_cf_name = parse(strings, ENV_METASTORE_SCHEMA_NAME, parse_string);
     let schema_versions_cf_name = parse(strings, ENV_METASTORE_VERSION_NAME, parse_string);
+    let user_cf_name = parse(strings, ENV_METASTORE_USER, parse_string);
     let default_version = parse(strings, ENV_SCHEMA_DEFAULT_VERSION, parse_number);
     let schema_versioning = parse(strings, ENV_SCHEMA_ENABLE_VERSIONING, parse_bool);
     let database = parse(strings, ENV_DATABASE, parse_string);
@@ -127,8 +134,13 @@ pub fn parse_config<S: Strings>(strings: &S) -> Result<super::Config, EnvError> 
     let drop_on_shutdown = parse(strings, ENV_DB_DROP_ON_SHUTDOWN, parse_bool);
     let descriptor_file_name = parse(strings, ENV_DB_DESCRIPTOR_FILE_NAME, parse_string);
     let database_descriptor_path = parse(strings, ENV_DEFAULT_DB_DESCRIPTOR_PATH, parse_pathbuf);
-    let drop_on_shutdown =  drop_on_shutdown?.unwrap_or(false);
+    let user = parse(strings, ENV_USER, parse_string);
+    let password = parse(strings, ENV_PASS, parse_string);
     
+    let drop_on_shutdown =  drop_on_shutdown?.unwrap_or(false);
+    let user = user?.unwrap_or(DEFAULT_USER.to_owned());
+    let password = password?.unwrap_or(DEFAULT_PASS.to_owned());
+
     let db = {
         let descriptor_file_name = descriptor_file_name?.unwrap_or(DEFAULT_DESCRIPTOR_NAME.to_string());
         let db_path = parse_rocks_db_path(strings, ENV_DB_PATH)?;
@@ -142,14 +154,20 @@ pub fn parse_config<S: Strings>(strings: &S) -> Result<super::Config, EnvError> 
         }
     };
 
+    let database = database?.unwrap_or(DEFAULT_DATABASE.to_string());
+
     let meta_store = {
         let index_cf_name = index_cf_name?.unwrap_or(DEFAULT_INDEX_CF_NAME.to_string());
         let schema_cf_name = schema_cf_name?.unwrap_or(DEFAULT_SCHEMA_CF_NAME.to_string());
         let schema_versions_cf_name = schema_versions_cf_name?.unwrap_or(DEFAULT_SCHEMA_VERSIONS_CF_NAME.to_string());
+        let user_cf_name = user_cf_name?.unwrap_or(DEFAULT_USER_CF_NAME.to_string());
+
         meta_store::Config {
             index_cf_name,
             schema_cf_name,
-            schema_versions_cf_name
+            schema_versions_cf_name,
+            user_cf_name,
+            default_db: database.clone(),
         }
     };
 
@@ -162,8 +180,6 @@ pub fn parse_config<S: Strings>(strings: &S) -> Result<super::Config, EnvError> 
         }
     };
 
-    let database = database?.unwrap_or(DEFAULT_DATABASE.to_string());
-
     let admin = {
         admin::Config {
 
@@ -172,10 +188,18 @@ pub fn parse_config<S: Strings>(strings: &S) -> Result<super::Config, EnvError> 
 
     let addr = addr?.unwrap_or(DEFAULT_ADDR.parse().unwrap());
     let database_descriptor_path = database_descriptor_path?.unwrap_or(PathBuf::from(DEFAULT_DB_DESCRIPTOR));
+    let auth = {
+        auth::Config {
+            password,
+            user,
+            meta_store: meta_store.clone()
+        }
+    };
     Ok(super::Config {
         addr,
         db,
         admin,
+        auth,
         meta_store,
         schema,
         default_database: (database, database_descriptor_path),
@@ -184,19 +208,7 @@ pub fn parse_config<S: Strings>(strings: &S) -> Result<super::Config, EnvError> 
     })
 }
 
-fn oc_trace_attributes(oc_attributes_file_path: String) -> HashMap<String, String> {
-    match fs::read_to_string(oc_attributes_file_path.clone()) {
-        Ok(attributes_string) => convert_attributes_string_to_map(attributes_string),
-        Err(err) => {
-            warn!(
-                "could not read OC trace attributes file at {}: {}",
-                oc_attributes_file_path, err
-            );
-            HashMap::new()
-        }
-    }
-}
-
+#[allow(unused)]
 fn convert_attributes_string_to_map(attributes: String) -> HashMap<String, String> {
     attributes
         .lines()
@@ -254,12 +266,12 @@ fn parse_rocks_db_path<S: Strings>(s: &S, base: &str) -> Result<PathBuf, EnvErro
 
     match path_str {
         Some(path) => match PathBuf::from_str(&path) {
-            Err(e) => Err(EnvError::InvalidEnvVar),
+            Err(_) => Err(EnvError::InvalidEnvVar),
             Ok(pb) => Ok(pb)
         },
         _ => {
             error!("{base} must be specified");
-            return Err(EnvError::NoRocksDbPath)
+            Err(EnvError::NoRocksDbPath)
         }
     }
 }
@@ -270,13 +282,6 @@ where
     ParseError: From<T::Err>,
 {
     s.parse().map_err(Into::into)
-}
-
-fn parse_duration_opt(s: &str) -> Result<Option<Duration>, ParseError> {
-    if s.is_empty() {
-        return Ok(None);
-    }
-    parse_duration(s).map(Some)
 }
 
 fn parse_pathbuf(s: &str) -> Result<PathBuf, ParseError> {

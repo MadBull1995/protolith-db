@@ -1,21 +1,15 @@
-
-use std::path::PathBuf;
-use std::{io, env};
-use std::process::{Command, Stdio};
-
-use users::{get_user_by_name, os::unix::UserExt};
-
+#![deny(rust_2018_idioms, clippy::disallowed_methods, clippy::disallowed_types)]
+#![forbid(unsafe_code)]
 
 use protolith_app::{
     Config,
     trace,
     BUILD_INFO,
     EX_USAGE, signals,
-    db
 };
 use protolith_macros::*;
 use serde::{Serialize, Deserialize};
-use tracing::{debug, info, warn, error};
+use tracing::{info, warn};
 use protolith_core::collection::Wrapper;
 use protolith_core::api::prost_wkt_types::Struct;
 #[derive(Serialize, Deserialize, Collection, Debug)]
@@ -25,8 +19,6 @@ struct MyStruct {
 
 #[tokio::main]
 async fn main() {
-    let app_user = "protolithdb";
-
     let trace = match trace::Settings::from_env().init() {
         Ok(t) => t,
         Err(e) => {
@@ -63,8 +55,8 @@ async fn main() {
 
     let shutdown_grace_period = config.shutdown_grace_period;
     // let databases = config.databases;
-    let mut app = match config
-        .build(trace)
+    let app = match config
+        .build(trace).await
     {
         Ok(app) => app,
         Err(e) => {
@@ -95,52 +87,4 @@ async fn main() {
 }
 
 
-fn run_setup_script(app_user: &str, app_dir: &str) -> io::Result<()> {
-    debug!(dir = ?env::current_dir().unwrap(), "Current ");
-
-    let current_dir = env::current_dir().expect("Failed to get current directory");
-    
-    // Construct the path to the script
-    let script_name = if cfg!(target_os = "windows") {
-        "setup.bat"
-    } else {
-        "setup.sh"
-    };
-    let script_path = PathBuf::from(current_dir)
-        .join("protolith-db") // Adjust this path as needed
-        .join("src")
-        .join(script_name);
-    // Check if the script exists
-    if !script_path.exists() {
-        error!("Script not found: {:?}", script_path);
-        return Err(io::Error::new(io::ErrorKind::NotFound, "Script not found"));
-    }
-    debug!(script_path = ?script_path, app_user = ?app_user, app_dir = ?app_dir, "Running setup script");
-    let mut child = Command::new(script_path)
-        .arg(app_user) // Pass app_user as the first argument
-        .arg(app_dir) 
-        .output();
-
-    match child {
-        Ok(output) => {
-            if !output.status.success() {
-                error!("Setup script failed to run");
-                error!("Stdout: {}", String::from_utf8_lossy(&output.stdout));
-                error!("Stderr: {}", String::from_utf8_lossy(&output.stderr));
-            } else {
-                info!("Setup script ran successfully");
-            }
-        },
-        Err(e) => {
-            error!("Failed to execute setup script: {}", e);
-            return Err(e);
-        }
-    }
-    
-
-    Ok(())
-}
-
-fn user_exists(username: &str) -> bool {
-    get_user_by_name(username).is_some()
-}
+// 

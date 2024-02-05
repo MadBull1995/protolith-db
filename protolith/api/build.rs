@@ -37,7 +37,7 @@ fn main() -> io::Result<()> {
     let descriptor_bytes =
         std::fs::read(descriptor_file)
         .unwrap();
-    std::fs::write(test_descriptor_path, descriptor_bytes.clone());
+    let _ = std::fs::write(test_descriptor_path, descriptor_bytes.clone());
     let descriptor =
         FileDescriptorSet::decode(&descriptor_bytes[..])
         .unwrap();

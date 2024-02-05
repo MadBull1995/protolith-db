@@ -8,7 +8,7 @@ pub use protolith_error as error;
 pub mod meta_store;
 pub mod db;
 pub mod schema;
-use serde::{Serialize, Deserialize}; // Make sure to add serde traits
+use serde::Serialize; // Make sure to add serde traits
 
 // Define a struct for your key wrapper, now generic over T
 pub struct Key<T> {

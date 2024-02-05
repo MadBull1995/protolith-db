@@ -1,14 +1,14 @@
-use std::{collections::HashMap, sync::Arc, time};
+use std::{collections::HashMap, sync::Arc};
 
-use protolith_api::{protolith::{
+use protolith_api::protolith::{
     metastore::v1::{SchemaVersion, Schema},
     core::v1::Collection
-}, pbjson_types::Timestamp};
+};
 use protolith_error::{Result, Error};
 use rocksdb::{DB, IteratorMode};
 use tracing::{error, debug, info};
 use protolith_api::prost::Message;
-use crate::{db::RocksDb, schema};
+use crate::schema;
 
 #[derive(Debug, Clone)]
 pub struct MetaStore {
@@ -16,6 +16,7 @@ pub struct MetaStore {
     pub(crate) index: String,
     pub(crate) schema: String,
     pub(crate) schema_config: schema::Config,
+    pub(crate) user_cf_name: String,
     collections: Vec<Collection>,
     users: Vec<()>,
     db: Arc<DB>,
@@ -32,6 +33,11 @@ pub struct Config {
 
     /// Column family name for storing schema version metadata.
     pub schema_versions_cf_name: String,
+
+    /// Column family name for storing user metadata.
+    pub user_cf_name: String,
+
+    pub default_db: String,
 }
 
 #[derive(Debug, Clone)]
@@ -50,7 +56,9 @@ impl Config {
         let Self {
             index_cf_name,
             schema_cf_name,
-            schema_versions_cf_name
+            schema_versions_cf_name,
+            user_cf_name,
+            ..
         } = self;
         let mut cache = HashMap::new();
         for mut collection in collections.clone() {
@@ -74,6 +82,7 @@ impl Config {
             index: index_cf_name,
             schema: schema_cf_name,
             schema_versions: schema_versions_cf_name,
+            user_cf_name,
             schema_config: schema,
             db,
             cache,
@@ -85,10 +94,6 @@ impl Config {
 }
 
 impl MetaStore {
-    pub fn create_user(&self) -> Result<(), Error> {
-        
-        Ok(())
-    }
 
     pub fn create_schema(&mut self, mut collection_schema: Collection) -> Result<Schema, Error> {
         let schema = handle_no_version_schema(self.schema.clone(), self.db.clone(), &mut collection_schema);
@@ -116,7 +121,31 @@ impl MetaStore {
             }
         }
     }
+
+
+    pub fn register_user(&self, username: String, password: String) {
+        let hashed_password = bcrypt::hash(password, bcrypt::DEFAULT_COST).unwrap();
+        // Store username and hashed_password in RocksDB
+        let user_cf = self.db.cf_handle(&self.user_cf_name).unwrap();
+        self.db.put_cf(user_cf, username, hashed_password).unwrap();
+    }
+
+    pub fn login_user(&self, username: String, password: String) -> Option<String> {
+        // Retrieve user and hashed password from RocksDB
+        let user_cf = self.db.cf_handle(&self.user_cf_name).unwrap();
+        let user = self.db.get_cf(user_cf, username).unwrap();
+        if let Some(hashed_password) = user {
+            let hashed_password = std::str::from_utf8(&hashed_password).unwrap();
+            if bcrypt::verify(password, hashed_password).unwrap() {
+                let session_token = uuid::Uuid::new_v4().to_string();
+                // Store session_token in RocksDB with an expiration time
+                return Some(session_token);
+            }
+        } 
+        None
+    }
 }
+
 
 fn parse_schema_version_from_key(key: &[u8]) -> Result<u64, Error> {
     let key_str = std::str::from_utf8(key).map_err(|_| "Invalid UTF-8 sequence")?;
@@ -135,7 +164,7 @@ fn handle_versioned_schema(schema_cf_name: String, schema_versions_cf_name: Stri
     let schema_handle = db.cf_handle(&schema_cf_name).unwrap();
     let schema_versions_handle = db.cf_handle(&schema_versions_cf_name).unwrap();
     let iter_mod = IteratorMode::From(&prefix, rocksdb::Direction::Forward);
-    let mut iter = db.iterator_cf(schema_versions_handle, iter_mod);
+    let iter = db.iterator_cf(schema_versions_handle, iter_mod);
     let mut latest = 0;
     for schema_ver in iter {
         match schema_ver {

@@ -22,4 +22,6 @@ pub enum OpError {
     KeyAlreadyExists(protolith_error),
     #[error("collection {1} already exists on {0}")]
     CollectionAlreadyExists(String, String),
+    #[error("user {0} not found")]
+    UserNotFound(String),
 }

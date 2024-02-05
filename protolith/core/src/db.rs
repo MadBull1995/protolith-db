@@ -1,17 +1,17 @@
-use rocksdb::{Options, ColumnFamilyDescriptor, Cache, BlockBasedOptions, WriteBatch, IteratorMode, DBIterator, Error as RocksDbError};
+use rocksdb::{Options, ColumnFamilyDescriptor, Cache, BlockBasedOptions, IteratorMode};
 
-use std::{path::PathBuf, sync::Arc, collections::HashMap, default};
+use std::{path::PathBuf, sync::Arc};
 use protolith_api::{protolith::{
     core::v1::{Collection, Field},
     metastore::v1::{SchemaVersion, Schema, Index}, annotation::v1::IndexType
-}, DescriptorPool, prost::bytes::Bytes, pbjson_types::{FieldDescriptorProto, field_descriptor_proto}, prost_wkt_types::{Any, Struct}};
+}, DescriptorPool, prost::bytes::Bytes, pbjson_types::field_descriptor_proto, prost_wkt_types::Any};
 use protolith_error::Error;
 use thiserror::Error as tError;
 use crate::{meta_store::{self, MetaStore}, schema};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error};
 pub use rocksdb::DB;
 use protolith_api::prost::Message;
-use prost_reflect::{Kind, DynamicMessage, MessageDescriptor};
+use prost_reflect::{Kind, DynamicMessage};
 
 #[derive(Debug, Clone, tError)]
 pub enum CoreError {
@@ -54,12 +54,13 @@ impl Config {
             ColumnFamilyDescriptor::new(cloned_metastore.schema_cf_name, Options::default()),
             ColumnFamilyDescriptor::new(cloned_metastore.index_cf_name, Options::default()),
             ColumnFamilyDescriptor::new(cloned_metastore.schema_versions_cf_name, Options::default()),
+            ColumnFamilyDescriptor::new(cloned_metastore.user_cf_name, Options::default()),
         ];
 
         db_opts.set_block_based_table_factory(&block_db_opts);
         let path =self.db_path.join(&name);
         let existing_cf_names = match DB::list_cf(&Options::default(), &path) {
-            Err(e) => None,
+            Err(_) => None,
             Ok(list_cf) => Some(list_cf)
         };
 
@@ -84,7 +85,6 @@ impl Config {
             ColumnFamilyDescriptor::new(cf_name, Options::default())
         }).collect::<Vec<_>>();
         combined_cf_descriptors.extend(new_cf_descriptors);
-
 
         // Process schema
         let mut collections = Vec::new();
@@ -127,6 +127,7 @@ impl Config {
             combined_cf_descriptors.extend(cf_descriptors);
         }
 
+        debug!(path = ?path, "Opening DB");
         let db = DB::open_cf_descriptors(&db_opts, &path, combined_cf_descriptors)?;
         
         debug!(db = ?name, config = ?meta_store, "Building Metastore");
@@ -163,6 +164,15 @@ pub enum DBError {
 }
 
 impl RocksDb {
+
+    pub fn create_user(&self, username: String, password: String) -> Result<(), Error> {
+        self.meta_store.register_user(username, password);
+        Ok(())
+    }
+
+    pub fn login_user(&self, username: String, password: String) -> Option<String> {
+        self.meta_store.login_user(username, password)
+    }
     
     pub fn get(&self, collection: String, key: &[u8]) -> Result<Any, Error> {
         let cf = self.db.cf_handle("default").unwrap();
@@ -227,7 +237,7 @@ impl RocksDb {
             // Seek for latest version of the schemas
             let mut latest_versions = std::collections::HashMap::new();
             // let iter_mode = IteratorMode::From((), ())
-            let mut iter = self.db.iterator_cf(versions_cf_handle, IteratorMode::Start);
+            let iter = self.db.iterator_cf(versions_cf_handle, IteratorMode::Start);
             for key_value in iter {
             match key_value {
                 Err(e) => error!("{}", e.into_string()),
@@ -252,10 +262,9 @@ impl RocksDb {
             let key = make_schema_key(&schema_id, &version); // Implement this based on your key structure
             if let Some(schema_bytes) = self.db.get_cf(schema_cf_handle, &key)? {
                 let schema = deserialize_schema(&schema_bytes); // Implement schema deserialization
-                collections.push(Collection {
-                    full_name: schema_id,
-                    ..Default::default()
-                });
+                let buf = Bytes::from(schema.schema_definition);
+                let col = Collection::decode(buf).unwrap();
+                collections.push(col);
             }
             }
 
@@ -263,7 +272,7 @@ impl RocksDb {
             for collection in &mut collections {
                 let collection_key_prefix = collection.full_name.clone().into_bytes();
                 let iter_mod = IteratorMode::From(&collection_key_prefix, rocksdb::Direction::Forward);
-                let mut iter = self.db.iterator_cf(index_cf_handle, iter_mod);
+                let iter = self.db.iterator_cf(index_cf_handle, iter_mod);
                 for key_value in iter {
                     match key_value {
                         Err(err) => error!("{}", err.into_string()),
@@ -282,7 +291,7 @@ impl RocksDb {
                 }
             }
         } else {
-            let mut iter = self.db.iterator_cf(schema_cf_handle, IteratorMode::Start);
+            let iter = self.db.iterator_cf(schema_cf_handle, IteratorMode::Start);
             for schema in iter {
                 match schema {
                     Err(err) => error!("{}", err),
@@ -293,7 +302,7 @@ impl RocksDb {
                         let mut collection = Collection::decode(buf).unwrap();
                         let collection_key_prefix = schema_id.into_bytes();
                         let iter_mod = IteratorMode::From(&collection_key_prefix, rocksdb::Direction::Forward);
-                        let mut iter = self.db.iterator_cf(index_cf_handle, iter_mod);
+                        let iter = self.db.iterator_cf(index_cf_handle, iter_mod);
                         for idx in iter {
                             match idx {
                                 Err(err) => error!("{}", err.into_string()),
@@ -445,7 +454,7 @@ fn parse_field_type(kind: Kind ) -> i32 {
         Kind::Message(_) => field_descriptor_proto::Type::Message.into(),
         Kind::Bytes => field_descriptor_proto::Type::Bytes.into(),
         Kind::Uint32 => field_descriptor_proto::Type::Uint32.into(),
-        Kind::Enum(e) => field_descriptor_proto::Type::Enum.into(),
+        Kind::Enum(_e) => field_descriptor_proto::Type::Enum.into(),
         Kind::Sfixed32 => field_descriptor_proto::Type::Sfixed32.into(),
         Kind::Sfixed64 => field_descriptor_proto::Type::Sfixed64.into(),
         Kind::Sint32 => field_descriptor_proto::Type::Sint32.into(),

@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, fs::{File, self}};
 use admin::Client;
+use std::io::Write;
 use protolith_core::{
     api::{protolith::{
         services::v1::{CreateDatabaseResponse, ListDatabasesResponse, InsertResponse},
@@ -11,6 +12,7 @@ use protolith_engine::client::{self as engine, Collection};
 use tonic::transport::{Endpoint, Channel};
 
 use protolith_admin as admin;
+use protolith_auth as auth;
 use tower::ServiceBuilder;
 
 
@@ -75,24 +77,76 @@ pub struct ProtolithDb {
     admin: admin::Client,
     meta_store: meta_store::Client,
     channel: Channel,
+    session: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectionOpt {
+    addr: &'static str,
+    username: String,
+    password: String,
+    clear_sessions: bool,
+}
+
+impl Default for ConnectionOpt {
+    fn default() -> Self {
+        ConnectionOpt {
+            addr: "http://0.0.0.0:5678",
+            password: "protolith".to_owned(),
+            username: "protolith".to_owned(),
+            clear_sessions: false,
+        }
+    }
 }
 
 impl ProtolithDb {
-    pub async fn connect(addr: &'static str) -> Result<Self, Error> {
-        let channel = Endpoint::from_static(&addr)
+    pub async fn connect(connection_opt: ConnectionOpt) -> Result<Self, Error> {
+        let channel = Endpoint::from_static(&connection_opt.addr)
             .connect()
             .await?;
+        let home = env!("HOME");
+        let path = format!("{}/{}", home, "protolith_session.txt");
+        let cloned_path = path.clone();
+        let cloned_chan = channel.clone();
+        let login = || async move {
+            // If the file doesn't exist or can't be read, authenticate and write the session to the file
+            let mut auth = auth::Client::new(cloned_chan.clone());
+            let s = auth.login(&connection_opt.username, &connection_opt.password).await.unwrap();
+            let session = s.session;
+
+            // Write the session to the file
+            let mut file = File::create(cloned_path).unwrap();
+            write!(file, "{}", session).unwrap();
+
+            session
+        };
+        // Try to read the session from the file
+        let session = if connection_opt.clear_sessions {
+            login().await
+        } else {
+            match fs::read_to_string(path.clone()) {
+                Ok(contents) => contents,
+                Err(_) => {
+                    login().await
+                }
+            }
+        };
         
         Ok(Self {
             channel: channel.clone(),
-            admin: admin::Client::new(channel.clone()),
+            admin: admin::Client::new(channel.clone(), session.clone()),
             meta_store: meta_store::Client {  },
+            session: Some(session),
         })
     }
 
     pub fn db(&self, database: &str) -> Result<engine::Client, Error> {
-        let client = engine::Client::new(self.channel.clone(), database.to_owned());
-        Ok(client)
+        if let Some(session) = &self.session {
+            let client = engine::Client::new(self.channel.clone(), database.to_owned(), session.to_string());
+            Ok(client)
+        } else {
+            Err("Must have a session before interacting with db".into())
+        }
     }
 
     // pub fn with_model<M>(&self, models: &str) -> M::Model
@@ -129,26 +183,30 @@ mod test {
     use tokio;
     
     pub const ADDR: &str = "http://localhost:5678";
-
+    pub const USER: &str = "protolith";
+    pub const PASS: &str = "protolith";
+    
     #[tokio::test]
     async fn test_list_databases() {
-        let mut protolithdb = ProtolithDb::connect(ADDR).await.expect("unable to connect");
+        let conn_opt = ConnectionOpt::default();
+        let mut protolithdb = ProtolithDb::connect(conn_opt).await.expect("unable to connect");
         let dbs = protolithdb.list_databases().await.unwrap();
         // assert_eq!(dbs.databases.len(), 1);
-        dbg!(dbs);
         let rep = protolithdb
             .create_database("my_new_db", PathBuf::from_str("/Users/amitshmulevitch/rusty-land/protolith-db/descriptor.bin").unwrap())
             .await
             .unwrap();
         println!("{:?}", rep);
         let dbs = protolithdb.list_databases().await.unwrap();
-        dbg!(dbs);
     }
 
     #[tokio::test]
     async fn test_insert() {
-        let mut protolithdb: ProtolithDb = ProtolithDb::connect(ADDR).await.expect("unable to connect");
-        let mut db = protolithdb.db("protolith").unwrap();
+        let conn_opt = ConnectionOpt::default();
+        let protolithdb: ProtolithDb = ProtolithDb::connect(conn_opt)
+            .await
+            .expect("unable to connect");
+        let db = protolithdb.db("protolith").unwrap();
         
         create_model!(MyCollection, Collection1Model, String);
         let mut model_1 = Collection1Model::new(db.clone());
@@ -180,23 +238,23 @@ mod test {
         let rep = model_3.insert(NotCollection {
             ..Default::default()
         }).await;
-
         dbg!(rep);
     }
 
     #[tokio::test]
     async fn test_get() {
-        let mut protolithdb: ProtolithDb = ProtolithDb::connect(ADDR).await.expect("unable to connect");
+        let conn_opt = ConnectionOpt::default();
+        let mut protolithdb: ProtolithDb = ProtolithDb::connect(conn_opt).await.expect("unable to connect");
         let mut db = protolithdb.db("protolith").unwrap();
         create_model!(MyCollection, CollectionModel, &'static str);
         let mut model = CollectionModel::new(db);
         let rep = model.get(Key::new("some_id")).await.unwrap();
-        dbg!(rep.into_inner());   
     }
 
     #[tokio::test]
     async fn test_iter() {
-        let mut protolithdb: ProtolithDb = ProtolithDb::connect(ADDR).await.expect("unable to connect");
+        let conn_opt = ConnectionOpt::default();
+        let mut protolithdb: ProtolithDb = ProtolithDb::connect(conn_opt).await.expect("unable to connect");
         let mut db = protolithdb.db("protolith").unwrap();
         create_model!(MyCollection, CollectionModel, String);
         let mut model = CollectionModel::new(db);
@@ -231,9 +289,10 @@ mod test {
             }
         }
 
-        let s = MyStruct::new("Hello world".to_string());
-        let s = s.serialize();
-        dbg!(MyStruct::into_struct(s));
+        // let s = MyStruct::new("Hello world".to_string());
+        // let s = s.serialize();
+        // MyStruct::insert(s);
+        // dbg!(MyStruct::into_struct(s));
     }
 }
 

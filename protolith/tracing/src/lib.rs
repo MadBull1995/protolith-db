@@ -76,6 +76,7 @@ impl Settings {
         }
     }
 
+    #[allow(unused)]
     fn for_test(filter: String, format: String) -> Self {
         Self {
             filter,

@@ -1,10 +1,6 @@
-use serde::{Serialize, Deserialize};
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::*;
-use protolith_core::api::prost_wkt_types;
-use protolith_core::collection::Wrapper;
-use prost_wkt_types::Struct;
 
 #[proc_macro_derive(Collection)]
 pub fn collection_derive(input: TokenStream) -> TokenStream {
